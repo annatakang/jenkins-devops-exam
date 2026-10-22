@@ -1,0 +1,101 @@
+{{- range $component := list "movie" "cast" }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $.Release.Name }}-{{ $component }}
+spec:
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+  selector:
+    app.kubernetes.io/instance: {{ $.Release.Name }}
+    app.kubernetes.io/component: {{ $component }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $.Release.Name }}-{{ $component }}
+spec:
+  replicas: {{ $.Values.api.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ $.Release.Name }}
+      app.kubernetes.io/component: {{ $component }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: {{ $.Release.Name }}
+        app.kubernetes.io/component: {{ $component }}
+    spec:
+      initContainers:
+        - name: wait-for-database
+          image: {{ $.Values.database.image | quote }}
+          command:
+            - sh
+            - -ec
+            - |
+              until pg_isready -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME"; do
+                sleep 2
+              done
+          env:
+            - name: DB_HOST
+              value: {{ printf "%s-%s-db" $.Release.Name $component | quote }}
+            - name: DB_USER
+              value: {{ printf "%s_db_username" $component | quote }}
+            - name: DB_NAME
+              value: {{ printf "%s_db_dev" $component | quote }}
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+      containers:
+        - name: api
+          image: "{{ (index $.Values $component).repository }}:{{ $.Values.image.tag }}"
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          command: ["uvicorn"]
+          args:
+            - app.main:app
+            - --host
+            - "0.0.0.0"
+            - --port
+            - "8000"
+            - --loop
+            - asyncio
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.database.existingSecret }}
+                  key: {{ $component }}-password
+            - name: DATABASE_URI
+              value: {{ printf "postgresql://%s_db_username:$(DB_PASSWORD)@%s-%s-db/%s_db_dev" $component $.Release.Name $component $component | quote }}
+            {{- if eq $component "movie" }}
+            - name: CAST_SERVICE_HOST_URL
+              value: {{ printf "http://%s-cast:8000/api/v1/casts/" $.Release.Name | quote }}
+            {{- end }}
+          startupProbe:
+            httpGet:
+              path: /api/v1/{{ $component }}s/openapi.json
+              port: http
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /api/v1/{{ $component }}s/openapi.json
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 15
+          resources:
+            {{- toYaml $.Values.api.resources | nindent 12 }}
+{{- end }}
