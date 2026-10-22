@@ -1,9 +1,8 @@
-version: '3.7'
 
 services:
   movie_service:
     build: ./movie-service
-    command: uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --loop asyncio
     volumes:
       - ./movie-service/:/app/
     ports:
@@ -25,7 +24,7 @@ services:
 
   cast_service:
     build: ./cast-service
-    command: uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --loop asyncio
     volumes:
       - ./cast-service/:/app/
     ports:
