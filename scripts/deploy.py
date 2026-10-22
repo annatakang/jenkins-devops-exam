@@ -83,10 +83,23 @@ with tempfile.TemporaryFile(mode="w+") as log:
             "/api/v1/casts/openapi.json",
             "/api/v1/movies/",
         ):
-            with urlopen(base + path, timeout=20) as response:
-                if response.status != 200:
-                    raise RuntimeError(f"HTTP check failed: {path}")
-                json.load(response)
+            for attempt in range(30):
+                try:
+                    with urlopen(base + path, timeout=5) as response:
+                        if response.status != 200:
+                            raise RuntimeError(f"HTTP check failed: {path}")
+                        json.load(response)
+                    break
+                except (OSError, ValueError, RuntimeError) as error:
+                    if attempt == 29:
+                        raise RuntimeError(
+                            f"{namespace} GET {path} failed after 30 attempts"
+                        ) from error
+                    print(
+                        f"Waiting for {namespace} {path}: {error}",
+                        flush=True,
+                    )
+                    time.sleep(2)
             print(f"PASS: {namespace} GET {path}", flush=True)
 
         if namespace != "prod":
